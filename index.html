@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>B-spline Curve Visualizer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 {
+            margin-bottom: 10px;
+        }
+
+        #controls {
+            margin-bottom: 20px;
+        }
+
+        #controls label {
+            margin-right: 10px;
+            font-weight: bold;
+        }
+
+        #controls select {
+            margin-right: 20px;
+            padding: 5px;
+        }
+
+        #instructions {
+            margin-top: 10px;
+            font-size: 0.9em;
+            color: #555;
+            max-width: 600px;
+            text-align: center;
+        }
+
+        #canvasContainer {
+            position: relative;
+            border: 1px solid #ccc;
+        }
+
+        canvas {
+            background-color: #f9f9f9;
+        }
+
+        /* Style for control points */
+        .control-point {
+            fill: red;
+            stroke: black;
+            stroke-width: 1px;
+            cursor: pointer;
+        }
+
+    </style>
+</head>
+<body>
+
+    <h1>B-spline Curve Visualizer</h1>
+
+    <div id="controls">
+        <label for="degree">Degree (k):</label>
+        <select id="degree">
+            <option value="1">1 (Linear)</option>
+            <option value="2" selected>2 (Quadratic)</option>
+            <option value="3">3 (Cubic)</option>
+        </select>
+        <span>Click on the canvas to add control points. Drag to move them. Right-click to remove.</span>
+    </div>
+
+    <div id="canvasContainer">
+        <canvas id="splineCanvas" width="800" height="600"></canvas>
+    </div>
+
+    <div id="instructions">
+        <p><strong>Instructions:</strong></p>
+        <ul>
+            <li><strong>Add Control Point:</strong> Click anywhere on the canvas.</li>
+            <li><strong>Move Control Point:</strong> Click and drag a control point to a new location.</li>
+            <li><strong>Remove Control Point:</strong> Right-click on a control point.</li>
+            <li><strong>Select Degree:</strong> Choose the degree of the B-spline from the dropdown.</li>
+        </ul>
+        <p>Ensure that the number of control points is at least <em>degree + 1</em> to form a valid B-spline curve.</p>
+    </div>
+
+    <script>
+        // Get references to HTML elements
+        const canvas = document.getElementById('splineCanvas');
+        const ctx = canvas.getContext('2d');
+        const degreeSelect = document.getElementById('degree');
+
+        // Control points array
+        let controlPoints = [];
+
+        // Degree of the B-spline
+        let degree = parseInt(degreeSelect.value);
+
+        // Variables for dragging control points
+        let isDragging = false;
+        let dragIndex = -1;
+
+        // Function to draw control points and B-spline curve
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw control polygon
+            if (controlPoints.length > 1) {
+                ctx.strokeStyle = '#888';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(controlPoints[0].x, controlPoints[0].y);
+                for (let i = 1; i < controlPoints.length; i++) {
+                    ctx.lineTo(controlPoints[i].x, controlPoints[i].y);
+                }
+                ctx.stroke();
+            }
+
+            // Draw control points
+            controlPoints.forEach((pt, index) => {
+                ctx.beginPath();
+                ctx.arc(pt.x, pt.y, 5, 0, 2 * Math.PI);
+                ctx.fillStyle = 'red';
+                ctx.fill();
+                ctx.strokeStyle = 'black';
+                ctx.stroke();
+            });
+
+            // Draw B-spline curve if enough control points
+            if (controlPoints.length >= degree + 1) {
+                const knots = generateKnotVector(controlPoints.length, degree);
+                const splinePoints = computeBSpline(controlPoints, degree, knots, 1000);
+                ctx.strokeStyle = 'blue';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(splinePoints[0].x, splinePoints[0].y);
+                for (let i = 1; i < splinePoints.length; i++) {
+                    ctx.lineTo(splinePoints[i].x, splinePoints[i].y);
+                }
+                ctx.stroke();
+            }
+        }
+
+        // Function to generate open uniform knot vector
+        function generateKnotVector(n, k) {
+            // n: number of control points
+            // k: degree
+            let m = n + k + 1;
+            let knots = [];
+
+            // Open uniform: first k+1 knots are 0, last k+1 knots are 1
+            for (let i = 0; i <= m; i++) {
+                if (i <= k) {
+                    knots.push(0);
+                } else if (i >= m - k) {
+                    knots.push(1);
+                } else {
+                    knots.push((i - k) / (m - 2 * k -1));
+                }
+            }
+            return knots;
+        }
+
+        // Cox-de Boor recursion formula for B-spline basis functions
+        function N(i, k, u, knots) {
+            if (k === 0) {
+                if (knots[i] <= u && u < knots[i + 1]) {
+                    return 1;
+                } else {
+                    return 0;
+                }
+            } else {
+                let denom1 = knots[i + k] - knots[i];
+                let term1 = 0;
+                if (denom1 !== 0) {
+                    term1 = ((u - knots[i]) / denom1) * N(i, k -1, u, knots);
+                }
+
+                let denom2 = knots[i + k +1] - knots[i +1];
+                let term2 = 0;
+                if (denom2 !== 0) {
+                    term2 = ((knots[i + k +1] - u) / denom2) * N(i +1, k -1, u, knots);
+                }
+
+                return term1 + term2;
+            }
+        }
+
+        // Function to compute B-spline points
+        function computeBSpline(controlPoints, degree, knots, numPoints) {
+            let splinePoints = [];
+            let uStart = knots[degree];
+            let uEnd = knots[knots.length - degree -1];
+            let step = (uEnd - uStart) / (numPoints -1);
+
+            for (let i = 0; i < numPoints; i++) {
+                let u = uStart + i * step;
+                let Cx = 0;
+                let Cy = 0;
+                for (let j = 0; j < controlPoints.length; j++) {
+                    let nj = N(j, degree, u, knots);
+                    Cx += nj * controlPoints[j].x;
+                    Cy += nj * controlPoints[j].y;
+                }
+                splinePoints.push({x: Cx, y: Cy});
+            }
+            return splinePoints;
+        }
+
+        // Event listeners for adding, dragging, and removing control points
+        canvas.addEventListener('mousedown', function(event) {
+            const rect = canvas.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+
+            // Check if clicked on a control point
+            for (let i = 0; i < controlPoints.length; i++) {
+                let pt = controlPoints[i];
+                let dx = pt.x - x;
+                let dy = pt.y - y;
+                if (Math.sqrt(dx*dx + dy*dy) < 7) { // radius for selection
+                    isDragging = true;
+                    dragIndex = i;
+                    return;
+                }
+            }
+
+            // If not clicking on a control point, add a new one
+            controlPoints.push({x: x, y: y});
+            draw();
+        });
+
+        canvas.addEventListener('mousemove', function(event) {
+            if (isDragging && dragIndex !== -1) {
+                const rect = canvas.getBoundingClientRect();
+                const x = event.clientX - rect.left;
+                const y = event.clientY - rect.top;
+                controlPoints[dragIndex].x = x;
+                controlPoints[dragIndex].y = y;
+                draw();
+            }
+        });
+
+        canvas.addEventListener('mouseup', function(event) {
+            isDragging = false;
+            dragIndex = -1;
+        });
+
+        // Prevent context menu on right-click and use it to remove points
+        canvas.addEventListener('contextmenu', function(event) {
+            event.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+
+            // Find and remove control point if right-clicked near it
+            for (let i = 0; i < controlPoints.length; i++) {
+                let pt = controlPoints[i];
+                let dx = pt.x - x;
+                let dy = pt.y - y;
+                if (Math.sqrt(dx*dx + dy*dy) < 7) { // radius for selection
+                    controlPoints.splice(i, 1);
+                    draw();
+                    return;
+                }
+            }
+        });
+
+        // Event listener for degree change
+        degreeSelect.addEventListener('change', function(event) {
+            degree = parseInt(degreeSelect.value);
+            // Ensure that number of control points >= degree +1
+            if (controlPoints.length < degree +1) {
+                alert(`Number of control points should be at least degree + 1 (${degree +1}).`);
+            }
+            draw();
+        });
+
+        // Initial draw
+        draw();
+
+        // Handle window resize
+        window.addEventListener('resize', function() {
+            const container = document.getElementById('canvasContainer');
+            canvas.width = container.clientWidth;
+            canvas.height = 600; // fixed height
+            draw();
+        });
+
+        // Set initial canvas size based on container
+        window.onload = function() {
+            const container = document.getElementById('canvasContainer');
+            canvas.width = 800;
+            canvas.height = 600;
+            draw();
+        };
+    </script>
+
+</body>
+</html>
